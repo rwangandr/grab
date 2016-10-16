@@ -1,7 +1,0 @@
-施工招标,http://www.tjconstruct.cn/zbxx.aspx?type=sgzb
-监理招标,http://www.tjconstruct.cn/zbxx.aspx?type=jlzb
-设计招标,http://www.tjconstruct.cn/zbxx.aspx?type=sjzb
-设备招标,http://www.tjconstruct.cn/zbxx.aspx?type=sbzb
-公路招标,http://www.tjconstruct.cn/zbxx.aspx?type=glzb
-专业招标,http://www.tjconstruct.cn/zbxx.aspx?type=qtzb
-

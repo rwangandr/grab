@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 __author__ = 'rwang'
 
 import smtplib
@@ -75,11 +76,19 @@ def sendmail(smtpserver, port, sender, subject, fromname, passwd, to, cc, mailbo
             server.quit()
         return nRet
 
-
 '''
-def __rename_component(org_comp):
-    new_comp = org_comp
-    if org_comp.lower() == 'bmx':
-        new_comp = 'sag'
-    return new_comp
+fromname = "Rocky<rwang_andr@126.com>"
+sender = "rwang_andr@126.com"
+passwd = "Passw0rd"
+to = "rwang2015@dingtalk.com, rwang_andr@126.com"
+debug_to = "rwang_andr@126.com"
+subject = "Monitor"
+smtpserver = "smtp.126.com"
+port = "25"
+cc = ""
+mailbody = '<!DOCTYPE html><html><head lang="en"><meta charset="UTF-8"><title></title></head><body>' + \
+    '<a href=http://www.tjconstruct.cn/shchxt/tonggao.doc/epr_zbgg/2016/ZBGG1104[2016]1003.htm>施工招标公告</a>' + \
+    '</body></html>'
+
+sendmail(smtpserver, port, sender, subject, fromname, passwd, to, cc, mailbody, attachments=None)
 '''

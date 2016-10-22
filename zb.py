@@ -13,14 +13,6 @@ def beContinue():
     else:
         return True
 
-def isExistSection(name):
-    name1 = "info.ini"
-    name2 = "urls.txt"
-    filename1 = r'%s%s/%s'%(__RESOURCE_FOLDER__,name,name1)
-    filename2 = r'%s%s/%s'%(__RESOURCE_FOLDER__,name,name2)
-    #print filename
-    return os.path.exists(filename1) and os.path.exists(filename2)
-
 def refreshInterval():
     return int(c.getValue("Runtime","session_interval"))
 
@@ -37,25 +29,31 @@ def convertTimeShow(ori_time):
         return ori_time,"Second"
 
 if __name__ == '__main__':
-    os.system("rm -rf grab.log")
-    logging.config.fileConfig("logging.ini")
-    logger = logging.getLogger('main')
-    g= grab.grab()
+    os.system("rm -rf *.log")
+
 
     c = configuration.configuration()
     c.fileConfig("configuration.ini")
+    mode = c.getValue("Project","mode")
+
+    l = configuration.configuration()
+    l.fileConfig("logging.ini")
+    if mode.lower() == "debug":
+        l.setValue("handler_consoleHandler","level","DEBUG")
+        l.setValue("handler_fileHandler","level","DEBUG")
+    else:
+        l.setValue("handler_consoleHandler","level","INFO")
+        l.setValue("handler_fileHandler","level","INFO")
+    logging.config.fileConfig("logging.ini")
+    logger = logging.getLogger('main')
+    g= grab.grab()
 
     while True:
         sites = c.getValue("Project","sites").split(",")
         for section in sites:
             name = c.getValue(section,"name")
-            if isExistSection(name):
-                logger.info("====Start Monitoring Job of Section %s====" %section)
-                g.monitor(section)
-            else:
-                logger.info("====Start Initial Job of Section %s====" %section)
-                g.init_base(section)
-            logger.info("====Finish Job of section %s====" %section)
+            logger.info("====Task %s,%s===="%(section,name))
+            g.monitor(section)
         if beContinue() is not True:
             logger.info("====Time is up, quit====")
             break

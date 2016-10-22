@@ -7,6 +7,9 @@ import os
 import time
 import sendmail
 import formpage
+import jsonpost
+import jspost
+import htmlparser
 import configuration
 import logging
 import logging.config
@@ -21,6 +24,21 @@ from BeautifulSoup import BeautifulSoup
 #__MONITOR_WAITING__ = 60*60*4
 __FORM_WAITING_TIME__ = 2
 __RESOURCE_FOLDER__ = "resource/"
+__FILE_INFO__ = "info.ini"
+__FILE_DATA__ = "urls.txt"
+__MONITOR__ = 1
+__INITIAL__ = 2
+__FILTER_PAGE_SUBMIT_KEYS__ = ","
+__FILTER_PAGE_SUBMIT_KEY__ = ":"
+__DUMMY_PAGE_NUMBER__ = "${PAGENUMBER}$"
+
+__WEBSITE_MODE_HTML__ = 0
+__WEBSITE_MODE_SUBMIT__ = 1
+__WEBSITE_MODE_JSON_POST__ = 2
+__WEBSITE_MODE_JS_POST__ = 3
+
+
+
 class grab:
     def __init__(self):
         logging.config.fileConfig("logging.ini")
@@ -29,23 +47,34 @@ class grab:
         self.__c.fileConfig("configuration.ini")
         self.__RETRY_TIMES__ = int(self.__c.getValue("Runtime","retry_times"))
         self.__f = formpage.formpage()
+        self.__h = htmlparser.htmlpaser()
+        self.__j = jsonpost.jsonpost()
+        self.__js = jspost.jspost()
+        self.__taskID = ""
 
-    def __gethrefname(self, content, kw):
+    def __gethrefnameByaTag(self, content, tagName):
         title = ""
-        pat = re.compile(r'title="([^"]*)"')
+        #print content,tagName
+        pat = re.compile(r'%s="([^"]*)"' %tagName)
+        h = pat.search(str(content))
+        if h is not None:
+            title = h.group(1)
+
+            #print title.replace("\n"," ")
+            title = title.replace("\n"," ")
+        #print "h - 1",h
+        '''
+        pat = re.compile(r'span="([^"]*)"')  #span around the name in title=
         h = pat.search(str(content))
         if h is not None:
             title = h.group(1)
             #print title.replace("\n"," ")
             return title.replace("\n"," ")
+        '''
+        return title
+        #print "h - 2",h
 
-        pat = re.compile(r'span="([^"]*)"')
-        h = pat.search(str(content))
-        if h is not None:
-            title = h.group(1)
-            #print title.replace("\n"," ")
-            return title.replace("\n"," ")
-
+        '''
         contents = str(content).split(kw)
         if len(contents) > 1:
             cutoff = contents[1].split("</a>")[0].split(">")
@@ -59,137 +88,118 @@ class grab:
                 title = title.strip()
         #print "strip done"
         return title.replace("\n"," ")
-
-    def __visitUrl(self, url):
-        data = ""
-        req = urllib2.Request(url)
-        try:
-            u = urllib2.urlopen(req)
-            data = u.read()
-        except urllib2.URLError, e:
-            pass
-            #self.__logger.error(url)
-            #self.__logger.error(e.reason)
-        finally:
-            return data
-
-    def __getahrefFromURL(self, url):
-        data = ""
-        content = []
-        nRetry = False
-        for i in range(0, self.__RETRY_TIMES__):
-            if nRetry:
-                self.__logger.warn("Retry %i" %i)
-            data = self.__visitUrl(url)
-            if data != "":
-                break
-            else:
-                nRetry = True
-        if data != "":
-            #print data
-            data = data.replace("<![endif]-->","")
-            content = BeautifulSoup(data).findAll('a')
-        else:
-            self.__logger.error("Failed to visit %s" %url)
-        #print "content",content
-        return content
-
-    def __getOptionTagFromURL(self, url):
-        data = ""
-        content = []
-        nRetry = False
-        for i in range(0, self.__RETRY_TIMES__):
-            if nRetry:
-                self.__logger.warn("Retry %i" %i)
-            data = self.__visitUrl(url)
-            if data != "":
-                break
-            else:
-                nRetry = True
-        if data != "":
-            #print data
-            data = data.replace("<![endif]-->","")
-            content = BeautifulSoup(data).findAll('option')
-        else:
-            self.__logger.error("Failed to visit %s" %url)
-        #print "content",content
-        return content
+        '''
 
     def __getahrefFromData(self, data):
         data = data.replace("<![endif]-->","")
         return BeautifulSoup(data).findAll('a')
 
     def __genAbsoluteUrl(self,url,href):
+        #print url, href
+        #print href.split("/")[-1]
+        #print "here:",href.replace(href.split("/")[-1],"")
         url = url.strip("/")
         urls = url.split("/")
         if len(urls) > 1:
             useless = urls[-1]
             url = url.replace(useless,"").strip("/")
-
+        #print url
         if href.startswith("/"):
             return urls[0]+ "//" + urls[2] + href
         else:
-            return url + "/" + href
+            pre = href.replace(href.split("/")[-1],"").strip("/")
+            if pre != "" and url.find(pre) != -1: #22,宁夏政府采购公共服务平台-招标公告
+                #print "yes"
+                url = url.split(pre)[0]
+                return url + href
+            else:
+                return url + "/" + href
 
     def __cleanClear(self, url):
         return url.strip("/").replace("amp;","")
 
     def __gethrefnamebydata(self, data, content):
-        #data = data.replace('"','')
-        #print data
-        #content = content.replace('"','')
-        #print content
-        splitter = content.strip("</a>").split(">")[0] + ">"
-        #splitter = splitter.replace()
+
+        #data = data.replace("'","").replace('"','').replace("&amp;","&")
+        #content = content.replace("'","").replace('"','').replace("&amp;","&")
+        data = data.replace("&amp;","&").replace("../","").replace("'","").replace('"','')
+        content = content.replace("&amp;","&").replace("../","").replace("'","").replace('"','')
+
+        splitter = content.strip("</a>")
+        #print("s-0", splitter)
+        splitter = splitter.split(">")[0]
+
+        #print("s-1",splitter)
+        if data.find(splitter) == -1:
+            self.__logger.warn("The splitter %s in gethrefnamebydata does not work!!!" %splitter)
+            self.__saveToFile("filter_debug.txt",[data,splitter],'w')
+            return ""
         #print splitter
-        #print data.split(splitter)[-1].split('<p class=now-link-title l>')[1]
         name = ""
         try:
-            name = data.split(splitter)[1].split('<p class="now-link-title l">')[1].split("</p>")[0].strip()
-        except:
-            pass
+            #name = data.split(splitter)[-1].split('<p class="now-link-title l">')[1].split("</p>")[0].strip()
+
+            #print data.split(splitter)[-1]
+            #print name
+            name = data.split(splitter)[-1]
+            #print name
+            if name.find('<p class=now-link-title l>') != -1: #13,name = 河北省公共资源交易服务平台
+                name = name.split('<p class=now-link-title l>')[1].split("</p>")[0].strip()
+                #print name
+                #print "2"
+            #return
+            if name.find('<span class=txt  title=') != -1: #9, name = 招标项目-中国国际招标网
+                name = name.split('<span class=txt  title=')[1]
+                name = name.split('>')[0]
+                #print "3",name
+
+            if name.find('>') != -1:
+                name = name.split('>')[1]
+
+            #print name
+            if name.find('<') != -1:
+                name = name.split('<')[0].strip()
+                #print "0",name
+            '''
+            if name.find('</a') != -1:
+                name = name.split('</a')[0].strip()
+                print "0",name
+
+            if name.find('</a>') != -1:
+                name = name.split('</a>')[0].strip()
+                print "1",name
+            '''
+            '''
+            if name.find('<p class="now-link-title l">') != -1: #13,name = 河北省公共资源交易服务平台
+                name = name.split('<p class="now-link-title l">')[1].split("</p>")[0].strip()
+                print "2",name
+            '''
+            '''
+            if name.find('>') != -1: #13,name = 河北省公共资源交易服务平台
+                name = name.split('>')[1]
+                print "2",name
+            '''
+
+            if name.find('<span>') != -1:
+                name = name.split('<span>')[0]
+                print "3",name
+
+            '''
+            if name.find('<font') != -1: #21 宁夏回族自治区公共资源交易网-工程交易
+                name = name.split('<font')[0]
+                print "4",name
+            '''
+            while True:
+                name = name.strip()
+                if name == name.strip():
+                    break
+            name = name.replace("\r\n","").replace(" ","").replace("\r","").replace("\n","").replace("\t","")
+            #print name
+        except Exception,e:
+            self.__logger.error(e)
+            name = ""
         #print name
         return name
-
-    def __retrieveURLsInPage(self,url,data,keyword):
-        url_list = []
-        #print url,data[0],keyword
-        contents = self.__getahrefFromData(data)
-        if contents == []:
-            self.__logger.error("Fail to get a href From URL %s" %(url))
-            return contents
-        tag = keyword.split(",")[0]
-        value = keyword.split(",")[1]
-        pat_href = re.compile(r'href="([^"]*)"')
-        pat_tag = re.compile(r'%s="([^"]*)"'%tag)
-        pat2 = re.compile(r'http')
-        #print contents
-        for content in contents:
-            h = pat_href.search(str(content))
-            if h is None:
-                continue
-            href = h.group(1)
-            t = pat_tag.search(str(content))
-            if t is None:
-                continue
-            tag_data = t.group(1)
-
-            #if ((keyword != "title") and (href.find(keyword) != -1)) or ((keyword == "title") and (str(content).find(keyword) != -1)):
-            if tag_data.find(value) != -1 and href != "":
-                #print content,href,keyword
-                name = self.__gethrefname(content, href)
-                if name == "":
-                    name = self.__gethrefnamebydata(data,str(content))
-                #name = self.__test(content)
-                #print href,name
-                if pat2.search(href):
-                    ans = href
-                else:
-                    ans = self.__genAbsoluteUrl(url,href)
-                ans = self.__cleanClear(ans)
-                #print ans
-                url_list.append(name+";"+ans)
-        return url_list
 
     def __convertDigInCharToNumber(self, char):
         dig = ""
@@ -200,283 +210,108 @@ class grab:
                 break
         return int(dig)
 
-    def __getPageCount(self,url,item,keyword,offsite):
-        count = self.__getPageCountByHref(url,item,keyword,offsite)
-        if count == 0:
-            #print "~~~"
-            count = self.__getPageCountByOption(url,item,keyword,offsite)
-        #print count
-        return count
-
-    def __getPageCountByHref(self,url,item,keyword,offsite):
-        count = 0
-        contents = self.__getahrefFromURL(url)
-        if contents == []:
-            self.__logger.error("Fail to get a href From URL %s" %(url))
-            return count
-        #print contents
-        #print item,keyword,offsite
-        pat = re.compile(r'%s="([^"]*)"' %item)
-        pat2 = re.compile(r'%s' %keyword)
-        #print item,keyword
-
-        for content in contents:
-            #print content
-            h = pat.search(str(content))
-
-            if h is None:
-                continue
-            href = h.group(1)
-            #print href
-            if pat2.search(href):
-                #print href.split(keyword)[-1],offsite
-
-                count_str = href.split(keyword)[-1].split(",")[int(offsite)-1].strip("(").strip(")").strip("'").strip('"').strip()
-                #print count_str
-                if count_str[0].isdigit() and count_str.find("/") == -1:
-                    #print keyword, href
-                    count_temp = self.__convertDigInCharToNumber(count_str)
-                else:
-                    continue
-                if count_temp > count:
-                    count = count_temp
-        return count
-
-    def __getPageCountByOption(self,url,item,keyword,offsite):
-        count = 0
-        contents = self.__getOptionTagFromURL(url)
-        if contents == []:
-            self.__logger.error("Fail to get Option tag From URL %s" %(url))
-            return count
-        #print contents
-        #print item,keyword,offsite
-        pat = re.compile(r'%s="([^"]*)"' %item)
-        #pat2 = re.compile(r'%s' %keyword)
-        #print item,keyword
-
-        for content in contents:
-            #print content
-            h = pat.search(str(content))
-
-            if h is None:
-                continue
-            href = h.group(1)
-            #print href
-            ####if pat2.search(href):
-                #print href.split(keyword)[-1],offsite
-                ###count_str = href.split(keyword)[-1].split(",")[int(offsite)-1].strip("(").strip(")").strip("'").strip('"').strip()
-                #print count_str
-            count_temp = self.__convertDigInCharToNumber(href)
-
-            if count_temp > count:
-                count = count_temp
-        #print count
-        return count
-
-    def __getPageDataHtml(self,url):
-        return self.__visitUrl(url)
-
-    def __getPageDataJS(self,url,page_submit_key,index):
-        time.sleep(__FORM_WAITING_TIME__)
-        return self.__f.handleForm(url,page_submit_key,index)
-
-    def __getPageData(self,url,keyword,page_submit_key,index):
-        #print url,keyword,page_submit_key,index
-        if page_submit_key == "":
-            if keyword.find("${pagenumber}$") != -1:
-                page_url = url.replace(url.split("/")[-1],keyword.replace("${pagenumber}$",str(index)))
-            elif keyword.find("/") != -1:
-                page_url = url.split(keyword)[0]+keyword+str(index)+"."+url.split(".")[-1]
-            else:
-                page_url = url+"&"+keyword+str(index)
-            self.__logger.info("Retrieve data from %s" % page_url)
-            data = self.__getPageDataHtml(page_url)
-            #print "==",data[0],"=="
-            #if data == "":
-            #    self.__logger.error("Fail to get data from %s",page_url)
-            return data
-        else:
-            return self.__getPageDataJS(url,page_submit_key,index)
-
     def __saveToFile(self, filename, sList, mode):
         nret = True
-        #print filename
+        #print filename,sList,mode
         data = ''
         for strUrl in sList:
             #print strUrl
             data = data + strUrl + '\r\n'
         f = open(filename,mode)
         try:
+            #print data.strip("\r\n")
             f.write(data.strip("\r\n"))
+            #f.write(data)
             f.write('\r\n')
                 #print "write file %s successfully" % filename
-        except:
+        except Exception,e:
+            self.__logger.error("Exception:" + str(e))
             self.__logger.error("write file %s failed" % filename)
             nret = False
-
-        f.close()
+        finally:
+            f.close()
         return nret
 
     def __getListFromFile(self, filename):
         urllist = []
+        if os.path.exists(filename) is not True:
+            return urllist
         f = open(filename,'r')
         try:
             for line in f.readlines():
                 urllist.append(line.strip("\r\n"))
-                #print "=="+line.strip("\r\n")+"=="
-        except:
+        except Exception,e:
+            self.__logger.error("Exception:" + str(e))
             self.__logger.error("read file %s error" %filename)
         finally:
             f.close()
         return urllist
 
-    '''
-    def __scanPageIndex(self, url):
-        lasturl = ''
-        last_page_word = self.__c.getValue("runtime","last_page_word")
-        urlprefix,count = self.__getPageCount(url,last_page_word)
-        #print("urlprefix is %s" % urlprefix)
-        if count != -1:
-            lasturl = urlprefix + str(count)
-
-        #for i in range(1,count+1):
-            urllist.append(urlprefix+str(i))
-        #
-        return lasturl
-
-    def __saveIndex(self, index_filename, url, folder):
-        lasturl = self.__scanPageIndex(url)
-        if lasturl == '':
-            self.__logger.error("Fail to get the index in the page %s" %url)
-                            #time.sleep(60)
-            return False
-
-        #indexfile = folder + '/' + 'index.txt'
-        indexurllist = [lasturl]
-        if self.__saveToFile(index_filename,indexurllist,'w') is not True:
-            self.__logger.error("Fail to save the index file %s" %index_filename)
-                            #time.sleep(60)
-            return False
-        return True
-    '''
-    def __grabChangedData(self,page_count,url,page_count_filters, url_filter,page_submit_key,urls_file):
-        items_count = 0
-        for i in range(1, page_count+1):
-            url_list = []
-            self.__logger.info("Get Page Data in Page %i of URL %s" %(i,url))
-            html_data = self.__getPageData(url,page_count_filters[1],page_submit_key,i)
-            if html_data == "":
-                self.__logger.error("Fail to get Page Data in Page %i of URL %s" %(i,url))
-                continue
-            #self.__logger.info("Scan page %i" %(i))
-            currentList = self.__retrieveURLsInPage(url,html_data,url_filter)
-            if currentList == []:
-                self.__logger.error("Fail to retrieve URLs In Page %i of URL %s" %(i,url))
-                continue
-            url_list.extend(currentList)
-
-            #self.__logger.info("Scan page %i done, to save the url list to file %s" %(i, urls_file))
-            if self.__saveToFile(urls_file,url_list,'a') is not True:
-                self.__logger.error("Failed to save the url list to file %s" %urls_file)
-                break
-            items_count = items_count + len(url_list)
-            #time.sleep(1)
-        return items_count
-
-
-    def __initUrl(self, url, folder, page_count_filters,page_submit_key,url_filter):
-        ###Handle the Index###
-
-        index_file = folder + '/' + 'info.ini'
-        page_count = self.__getPageCount(url,page_count_filters[0],page_count_filters[1],page_count_filters[2])
-        if page_count == 0:
-            self.__logger.error("Fail to get the page count")
-            return False
-
-        if self.__saveToFile(index_file,[""],'w') is not True:
-            self.__logger.error("Fail to save the index file in %s" %folder)
-            return False
-
-        index_file_c = configuration.configuration()
-        index_file_c.fileConfig(index_file)
-        index_file_c.setValue("Info","page_count",str(page_count))
-        index_file_c.setValue("Info","url",url)
-        index_file_c.setValue("Info","name",folder.split("/")[-1])
-        ISOTIMEFORMAT= '%Y-%m-%d %X'
-        index_file_c.setValue("Info","timestamp",time.strftime(ISOTIMEFORMAT,time.localtime()))
-
-        urls_file = folder + '/' + 'urls.txt'
-        items_count = self.__grabChangedData(page_count,url,page_count_filters,url_filter,page_submit_key,urls_file)
-            #break
-
-        index_file_c.setValue("Info","items_count",str(items_count))
-        return True
-
-    def __sendReport(self,mailbody=""):
+    def __sendReport(self,mailbody="",count=0, mode=""):
         srv = self.__c.getValue("Report","smtpserver")
         port = self.__c.getValue("Report","port")
         sender = self.__c.getValue("Report","sender")
         fromname = self.__c.getValue("Report","from")
         subject = self.__c.getValue("Report","subject")
+        subject = str(count) + subject + self.__c.getValue(self.__taskID,"name")
         pwd = self.__c.getValue("Report","password")
         to = self.__c.getValue("Report","to")
+        cc = self.__c.getValue("Report","cc")
         attachments = None
-        mode = self.__c.getValue("Project","mode")
+
         if mode != "" and mode == "debug":
-            to = self.__c.getValue("Report","debug_to")
-            subject = mode.upper()
-            attachment = os.getcwd() + "/" + "grab.log"
+            to = self.__c.getValue("Report", "debug_to")
+            subject = mode.upper() + "_" + subject
+            attachment = os.getcwd() + "/" + "serverzb.log"
             attachments = [attachment]
-        sendmail.sendmail(srv, port, sender, subject, fromname, pwd, to, "", mailbody, attachments)
+        nRet = False
+        for i in (0,self.__RETRY_TIMES__):
+            nRet = sendmail.sendmail(srv, port, sender, subject, fromname, pwd, to, cc, mailbody, attachments)
+            if nRet:
+                break
+            if i < self.__RETRY_TIMES__:
+                self.__logger.debug("RETRY send mail %i" % (i+1))
+        if nRet is not True:
+            self.__logger.error("Fail to send out email")
+        return nRet
 
     def __genMessage(self, data):
         body_prefix = '<!DOCTYPE html><html><head lang="en"><meta charset="UTF-8"><title></title></head><body>'
         body_suffix = '</body></html>'
         return body_prefix + data + body_suffix
 
-    def __setupFolder(self,name):
-        os.system("rm -rf %s" %name)
-        os.system("mkdir %s" %name)
-
     def __logTimeStamp(self):
         ISOTIMEFORMAT= '%Y-%m-%d %X'
         self.__logger.info(time.strftime(ISOTIMEFORMAT, time.localtime()))
 
-    def __initFoler(self,folder):
-        os.system("rm -rf %s" %folder)
-        os.system("mkdir %s" %folder)
+    def __initFolderNFile(self,folders):
+        folder_list = folders.split("/")
+        folder = ""
+        for sub_folder in folder_list:
+            folder = folder + sub_folder
+            if os.path.exists(folder) is not True:
+                os.system("mkdir %s" %folder)
+            folder = folder + "/"
+        '''
+        name = self.__taskID+ "_" + self.__c.getValue(self.__taskID,"name")
 
-    def init_base(self, section):
-        self.__logTimeStamp()
-        folder = __RESOURCE_FOLDER__ + self.__c.getValue(section,"name")
-        root_url = self.__c.getValue(section,"url")
-        page_count_filters = self.__c.getValue(section,"page_count_filters")
-        page_submit_key = self.__c.getValue(section,"page_submit_key")
-        target_url_highlight = self.__c.getValue(section,"target_url_highlight")
-        self.__initFoler(folder)
-        self.__initUrl(root_url, folder, page_count_filters.split(","),page_submit_key,target_url_highlight)
-
-    def __compareItemChange(self,src_file,des_file):
-        src_url_list = self.__getListFromFile(src_file)
-        des_url_list = self.__getListFromFile(des_file)
-        changed_url_list = []
-        end = False
-        for src_url in src_url_list:
-            for des_url in des_url_list:
-                if des_url == src_url:
-                    end = True
-                    break
-            if end:
-                break
-            else:
-                changed_url_list.append(src_url)
-        return changed_url_list
-
+        if os.path.exists(__RESOURCE_FOLDER__ + "/" + name) is not True:
+            os.system("mkdir %s" %(__RESOURCE_FOLDER__ + "/" + name))
+        '''
+        c_info = configuration.configuration()
+        file_info = folder + __FILE_INFO__
+        c_info.fileConfig(file_info)
+        url = self.__c.getValue(self.__taskID,"url")
+        c_info.setValue("Info","url",self.__genFirstPageUrl(url))
+        name = self.__c.getValue(self.__taskID,"name")
+        c_info.setValue("Info","name",name)
+        ISOTIMEFORMAT= '%Y-%m-%d %X'
+        c_info.setValue("Info","timestamp",time.strftime(ISOTIMEFORMAT,time.localtime()))
 
     def __appendChangeToFile(self,new_url_list,url_file):
         ori_url_list = self.__getListFromFile(url_file)
         temp_file = 'temp.txt'
-        if self.__saveToFile(temp_file,new_url_list+ ori_url_list,'w') is not True:
+        if self.__saveToFile(temp_file,new_url_list+ori_url_list,'w') is not True:
             self.__logger.error("failed to save the new target file %s" %temp_file)
             os.system("rm -rf %s" %temp_file)
             return False
@@ -484,73 +319,282 @@ class grab:
         os.system("mv %s %s" % (temp_file, url_file))
         return True
 
-    def __scanUrl(self, url, folder, page_count_filters,page_submit_key,url_filter):
-        web_page_count = self.__getPageCount(url,page_count_filters[0],page_count_filters[1],page_count_filters[2])
-        if web_page_count == 0:
-            self.__logger.error("Fail to get the page count")
-            return []
-
-        index_file = folder + '/' + 'info.ini'
-        index_file_c = configuration.configuration()
-        index_file_c.fileConfig(index_file)
-        ISOTIMEFORMAT= '%Y-%m-%d %X'
-        index_file_c.setValue("Info","timestamp",time.strftime(ISOTIMEFORMAT, time.localtime()))
-
-        ori_page_count = int(index_file_c.getValue("Info","page_count"))
-        page_count = web_page_count - ori_page_count + 1
-
-
-        urls_file = folder + '/'+ 'urls_temp.txt'
-        items_count = self.__grabChangedData(page_count,url,page_count_filters, url_filter,page_submit_key,urls_file)
-        if items_count == 0:
-            self.__logger.error("Fail to get the changed count")
-            return []
-
-        ori_urls_file = folder + '/'+ 'urls.txt'
-        changed_url_list = self.__compareItemChange(urls_file,ori_urls_file)
-        os.system("rm -rf %s" %urls_file)
-        if changed_url_list == []: #get new target url
-            return []
-        self.__logger.info("Detect %i changes",len(changed_url_list))
-        if self.__appendChangeToFile(changed_url_list,ori_urls_file) is not True:
-            return []
-
-        items_count = len(self.__getListFromFile(ori_urls_file))
-        index_file_c.setValue("Info","page_count",web_page_count)
-        index_file_c.setValue("Info","items_count",items_count)
-
-        return changed_url_list
-
-    def monitor(self, section):
+    def monitor(self, task_id):
+        self.__taskID = task_id
         self.__logTimeStamp()
-        folder = __RESOURCE_FOLDER__ + self.__c.getValue(section,"name")
-        root_url = self.__c.getValue(section,"url")
-        page_count_filters = self.__c.getValue(section,"page_count_filters")
-        page_submit_key = self.__c.getValue(section,"page_submit_key")
-        target_url_highlight = self.__c.getValue(section,"target_url_highlight")
+        task_name = {__MONITOR__:"Monitor",__INITIAL__:"Initial"}
+        folder = __RESOURCE_FOLDER__  + task_id + "_" + self.__c.getValue(task_id,"name")
+        urls_file = folder + "/" + __FILE_DATA__
+        info_url_key = self.__c.getValue(task_id,"info_url_key")
+        name_tag = self.__c.getValue(task_id,"name_tag")
+        url_sample = self.__c.getValue(task_id,"url")
+        page_base = self.__genPageBase(int(self.__c.getValue("Runtime","page_base")),int(self.__c.getValue("Runtime","session_interval")))
+        #print folder
+        task_mode = self.__detectTaskMode(folder)
+        self.__logger.info("====%s...====" %task_name[task_mode])
+        if task_mode == __INITIAL__:
+            self.__initFolderNFile(folder)
+        iPage = 0
+        url_count_per_page = 0
+        changed_urls_all = []
+        website_mode = self.__detectWebsiteMode(url_sample)
+        while True:
+            iPage += 1
+            if iPage > page_base:
+                self.__logger.debug("current page %i is exceed the page_base %i" %(iPage,page_base))
+                break
+            self.__logger.info("Get page data in page %i"%iPage)
+            page_data = self.__getPageData(url_sample,iPage,website_mode)
+            if page_data == "":
+                self.__logger.error("Fail to get page data")
+                break
+            #print page_data[0:20]
+            l_info_url = self.__retrieveURLs(page_data,info_url_key,name_tag,website_mode)
+            #if iPage == 1:
+            #    url_count_per_page = len(l_info_url)
+            #    self.__logger.debug("url_count_per_page is %i" %url_count_per_page)
+            if l_info_url ==[]:
+                self.__logger.error("Fail to get info url")
+                break
+            self.__logger.debug("Get %i info urls" %len(l_info_url))
 
-        changed_url_list = self.__scanUrl(root_url, folder, page_count_filters.split(","),page_submit_key,target_url_highlight)
+            changed_urls = self.__compareWithUrlsInfoInDatabase(l_info_url,urls_file)
+
+            if len(changed_urls) == 0:
+                self.__logger.debug("There is no changed url any more")
+                break
+            else:
+                self.__appendChangeToFile(changed_urls,urls_file)
+                self.__logger.debug("get changed items %i" %len(changed_urls))
+                changed_urls_all.extend(changed_urls)
+                #if len(changed_urls) < url_count_per_page:
+                #    self.__logger.debug("count of changed url %i is less than the count per page %i" %(len(changed_urls),url_count_per_page))
+                #    break
+        self.__logger.info("===Scanning Done===")
+        if changed_urls_all == []:
+            self.__logger.info("Nothing changed")
+            return
+        self.__logger.info("Get %i changes" %(len(changed_urls_all)))
+        if task_mode == __MONITOR__:
+            self.__logger.info("Notify the changes")
+            self.__notifyTheChanges(changed_urls_all)
+
+    def __notifyTheChanges(self,changeList):
         notify = ''
-        for changed_url in changed_url_list:
-            notify_line = '<a href=\"' + changed_url.split(";")[1] + '\">' + changed_url.split(";")[0] + '</a>'
+        if changeList == []:
+            self.__logger.info("Nothing to notify")
+            return
+        i = 1
+        for line in changeList:
+            try:
+                notify_line = '<a href=\"' + line.split(";")[1] + '\">' + str(i) + "." +line.split(";")[0] + '</a>'
+            except:
+                notify_line = ""
             notify = notify + notify_line + '<br>'
+            i += 1
 
-        if notify != '':
-            mail_body = self.__genMessage(notify)
-            self.__logger.info("Send mail with notify %s" %notify)
-            self.__sendReport(mail_body)
-            self.__logger.info("Send mail done")
+        mail_body = self.__genMessage(notify)
+        mode = self.__c.getValue("Project","mode")
+        debug_info = ""
+        if mode.lower() == "debug":
+            debug_info = "in debug mode"
+        self.__logger.info("Send mail with notify %s %s" %(notify,debug_info))
+        if self.__sendReport(mail_body, len(changeList), mode):
+            self.__logger.info("Send mail successfully")
         else:
-            mode = self.__c.getValue("Project","mode")
-            if mode.lower() == "debug":
-                self.__logger.info("Send debug log")
-                self.__sendReport()
-                self.__logger.info("Send debug log done")
+            self.__logger.error("Fail to send mail")
 
+    def __detectTaskMode(self, folder):
+        if self.__isExistSection(folder):
+            return __MONITOR__
+        else:
+            return __INITIAL__
+
+    def __isExistSection(self,folder):
+        file_ini = r'%s/%s'%(folder,__FILE_INFO__)
+        file_data = r'%s/%s'%(folder,__FILE_DATA__)
+        return os.path.exists(file_ini) and os.path.exists(file_data)
+
+    def __genFirstPageUrl(self, url):
+        if url.find(__DUMMY_PAGE_NUMBER__) != -1:
+            return url.replace(__DUMMY_PAGE_NUMBER__, "1")
+        else:
+            return url
+
+    def __genURLByReplaceKey(self,url_sample,count):
+        return url_sample.replace(__DUMMY_PAGE_NUMBER__,str(count))
+
+    def __genURLBySubmit(self,url_sample,count,l_submitter):
+        pass
+
+    def __getPageData(self,url,index,mode):
+        data = ""
+        if mode == __WEBSITE_MODE_HTML__:
+            url = url.replace(__DUMMY_PAGE_NUMBER__, str(index))
+            data = self.__getPageDataHtml(url)
+        elif mode == __WEBSITE_MODE_SUBMIT__:
+            l_submit_key = self.__genSubmitKeyList()
+            data = self.__getPageDataJS(url,l_submit_key,index)
+        elif mode == __WEBSITE_MODE_JSON_POST__:
+            post_url = self.__c.getValue(self.__taskID,"post_url")
+            post_para = self.__c.getValue(self.__taskID,"post_para")
+            post_header = self.__c.getValue(self.__taskID,"post_header")
+            per_request = self.__c.getValue(self.__taskID,"per_request")
+            if per_request != "":
+                per_request = int(per_request)
+            else:
+                per_request = 0
+            data = self.__getPageDataJSONPost(post_url,post_para,post_header,index,per_request)
+        elif mode == __WEBSITE_MODE_JS_POST__:
+            post_url = self.__c.getValue(self.__taskID,"post_url")
+            post_para = self.__c.getValue(self.__taskID,"post_para")
+            per_request = int(self.__c.getValue(self.__taskID,"per_request"))
+            splitter = self.__c.getValue(self.__taskID,"splitter")
+            stripper = self.__c.getValue(self.__taskID,"stripper")
+            #target_url = self.__c.getValue(self.__taskID,"target_url")
+            data = self.__getPageDataJSPost(post_url,post_para,index,per_request,splitter,stripper)
+        return data
+
+    def __getPageDataHtml(self,url):
+        return self.__h.getHtmlData(url)
+        #return self.__visitUrl(url)
+
+    def __getPageDataJS(self,url,keys, index):
+        time.sleep(__FORM_WAITING_TIME__)
+        return self.__f.handleForm(url,keys,index)
+
+    def __genSubmitKeyList(self):
+        l = []
+        s = self.__c.getValue(self.__taskID,"page_submit_keys").split(__FILTER_PAGE_SUBMIT_KEYS__)
+        for k in s:
+           l.append(k.split(__FILTER_PAGE_SUBMIT_KEY__))
+        return l
+
+    def __retrieveURLs(self,data,urlKey,nameTag, mode):
+        if mode == __WEBSITE_MODE_HTML__ or mode == __WEBSITE_MODE_SUBMIT__ or mode == __WEBSITE_MODE_JS_POST__:
+            return self.__retrieveURLsInfoInPage(data,urlKey,nameTag)
+        elif mode == __WEBSITE_MODE_JSON_POST__:
+            target_url = self.__c.getValue(self.__taskID,"target_url")
+            json_name = self.__c.getValue(self.__taskID,"json_name")
+            json_urlid = self.__c.getValue(self.__taskID,"json_urlid")
+            #print target_url
+            return self.__retrieveURLsByJSONPost(data,json_name,target_url,json_urlid)
+        else:
+            return []
+
+    def __retrieveURLsInfoInPage(self,data,urlKey,nameTag):
+        #print urlKey
+        url_list = []
+        contents = self.__getahrefFromData(data)
+        if contents == []:
+            self.__logger.error("Fail to get a href From data")
+            return url_list
+        #tag = keyword[0]
+        #value = keyword[1]
+        pat_href = re.compile(r'href="([^"]*)"')
+        #pat_tag = re.compile(r'%s="([^"]*)"'%tag)
+        pat2 = re.compile(r'http')
+
+        for content in contents:
+            h = pat_href.search(str(content))
+            if h is None:
+                continue
+            href = h.group(1)
+            if href == "": #There is no url link
+                continue
+            #print "1",str(content)
+            if urlKey != "" and href.find(urlKey) == -1:  #The href url link does not contain the expected words
+                #print("href does not contain urlKey")
+                #print str(content).find(urlKey)
+                if str(content).find(urlKey) == -1:      #The <a> content does not contain the expected words
+                    continue
+            #name = ""
+            #print "2",str(content)
+            if nameTag == "title": ##the url name is in href title
+                name = self.__gethrefnameByaTag(content, nameTag)
+            else:
+                name = self.__gethrefnamebydata(data,str(content))
+            if name == "":
+                continue
+                #name = self.__test(content)
+            #print href,name
+            if pat2.search(href):
+                ans = href
+            else:
+                base_url = self.__genFirstPageUrl(self.__c.getValue(self.__taskID,"url"))
+                ans = self.__genAbsoluteUrl(base_url,href)
+            ans = self.__cleanClear(ans)
+                #print ans
+            url_list.append(name+";"+ans)
+        return url_list
+
+    def __compareWithUrlsInfoInDatabase(self, src_urls,des_file):
+        des_urls = self.__getListFromFile(des_file)
+        if des_urls == []:
+            #self.__saveToFile(des_file,src_urls,'a')
+            return src_urls
+        else:
+            changed_urls = []
+            for src_url in src_urls:
+                end = False
+                for des_url in des_urls:
+                    if des_url == src_url:
+                        end = True
+                        break
+                if end:
+                    pass
+                else:
+                    changed_urls.append(src_url)
+            return changed_urls
+
+    def __genPageBase(self,per,during):
+        i = int(during/60/60)
+        if i == 0:
+            hours = 1
+        else:
+            hours = i
+        return per*hours
+
+    def __detectWebsiteMode(self,url):
+        if url.find(__DUMMY_PAGE_NUMBER__) != -1:
+            return __WEBSITE_MODE_HTML__
+        elif self.__c.getValue(self.__taskID,"page_submit_keys") != "":
+            return __WEBSITE_MODE_SUBMIT__
+        elif self.__c.getValue(self.__taskID,"post_url") != "" and self.__c.getValue(self.__taskID,"post_para") != "" \
+                and self.__c.getValue(self.__taskID,"target_url") != "" and self.__c.getValue(self.__taskID,"json_name") != "" \
+                and self.__c.getValue(self.__taskID,"json_urlid") != "":
+            return __WEBSITE_MODE_JSON_POST__
+        elif self.__c.getValue(self.__taskID,"post_url") != "" and self.__c.getValue(self.__taskID,"post_para") != "" \
+                and self.__c.getValue(self.__taskID,"info_url_key") != "":
+            return __WEBSITE_MODE_JS_POST__
+        else:
+            return -1
+
+    def __getPageDataJSONPost(self, url,para,header,pageNumber,perRequest):
+        #print url
+        data = self.__j.jsonRequest(url,para,header,pageNumber,perRequest)
+        #print data
+        if data == "{}" or data == "[]":
+            data = ""
+        return data
+        #return j.jsonParser(data)
+
+    def __retrieveURLsByJSONPost(self, data,key_name,key_url,url_id):
+        return self.__j.jsonParser(data,key_name,key_url,url_id)
+
+    def __getPageDataJSPost(self,url,para,pageIndex,requestNumber,strSplitter,strStripper):
+        #print url
+        data = self.__js.jsRequest(url,para,pageIndex,requestNumber,strSplitter,strStripper)
+        #print data
+        return data
+
+    def __retrieveURLsByJSPost(self, data,url_keys):
+        return []
+        #return self.__j.jsonParser(data,url_keys)
 
 #g = grab()
 #g.init_base("Site4")
 #g.init_base("Site9")
 #g.init_base("Site8")
 
-#nohup python -u grab.py > nohup.out 2>&1 &
+#nohup python -u zb.py > nohup.out 2>&1 &

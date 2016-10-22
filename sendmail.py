@@ -6,18 +6,23 @@ import email.MIMEMultipart
 import email.MIMEText
 import email.MIMEBase
 import os.path
+import chardet
 
-
+def __getCharset(data):
+    chardit = chardet.detect(data)
+    return chardit['encoding']
 
 def sendmail(smtpserver, port, sender, subject, fromname, passwd, to, cc, mailbody, attachments=None):
     nRet = True
     if mailbody == "":
         print("The mailbody is empty")
-
+    coder = __getCharset(mailbody)
+    mailbody.decode(coder).encode('utf-8')
     #
     main_msg = email.MIMEMultipart.MIMEMultipart()
 
     #
+    #print mailbody
     text_msg = email.MIMEText.MIMEText(mailbody, 'html','utf-8')
     text_msg["Accept-Language"]="zh-CN"
     text_msg["Accept-Charset"]="ISO-8859-1,utf-8"
@@ -45,7 +50,7 @@ def sendmail(smtpserver, port, sender, subject, fromname, passwd, to, cc, mailbo
 
     #
     #main_msg['From'] = fromname
-    main_msg['To'] = to
+
 
     main_msg['Subject'] = subject
     main_msg['Date'] = email.Utils.formatdate()
@@ -53,12 +58,16 @@ def sendmail(smtpserver, port, sender, subject, fromname, passwd, to, cc, mailbo
     if cc != '':
         main_msg['Cc'] = cc
         toall = to + "," + cc
+    #print toall.split(",")
+    #print cc
+    main_msg['To'] = toall
     #
     fullText = main_msg.as_string()
 
     #
     server = None
-    print ("setup mail connection")
+    #print ("setup mail connection")
+
     try:
         server = smtplib.SMTP(smtpserver, int(port))
         server.ehlo()
@@ -66,11 +75,12 @@ def sendmail(smtpserver, port, sender, subject, fromname, passwd, to, cc, mailbo
         server.ehlo()
         server.login(sender, passwd)
         server.sendmail(sender, toall.split(","), fullText)
-        print("Send email out")
-    except smtplib.SMTPException:
+        #print("Send email out")
+    except smtplib.SMTPException as e:
+        print e
 #    except Exception, e:
         nRet = False
-        print("Fail to send email")
+        #print("Fail to send email")
     finally:
         if server:
             server.quit()

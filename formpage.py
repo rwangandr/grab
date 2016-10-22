@@ -10,6 +10,7 @@ import time
 import logging
 import logging.config
 import configuration
+import htmlparser
 
 class formpage:
     def __init__(self):
@@ -61,6 +62,8 @@ class formpage:
         self.__RETRY_TIMES__ = int(c.getValue("Runtime","retry_times"))
         self.__PAGE_INTERVAL__ = int(c.getValue("Runtime","page_interval"))
 
+        self.__h = htmlparser.htmlpaser()
+
     def __submit(self):
         page_data = ""
         tried = 1
@@ -69,75 +72,78 @@ class formpage:
                 self.__br.submit()
                 page_data = self.__br.response().read()
                 break
-            except mechanize.HTTPError as e:
-                self.__logger.error(e.code)
+            except Exception,e:
+                self.__logger.error("Exception:" + str(e))
                 tried = tried + 1
                 if tried > self.__RETRY_TIMES__:
                     return page_data
                 time.sleep(self.__PAGE_INTERVAL__)
+                self.__logger.warn("Retry %i" %tried)
 
-            except mechanize.URLError as e:
-                self.__logger.error(e.reason.args)
-                tried = tried + 1
-                if tried > self.__RETRY_TIMES__:
-                    return page_data
-                time.sleep(self.__PAGE_INTERVAL__)
-            except:
-                self.__logger.error("mechanize Unknown error!")
-                tried = tried + 1
-                if tried > self.__RETRY_TIMES__:
-                    return page_data
-                time.sleep(self.__PAGE_INTERVAL__)
-
+        page_data = self.__h.cleanClear(page_data)
+        page_data = self.__h.convertToU(page_data)
         return page_data
 
-
-    def __handleControlHidden(self, form, control, page_keys,page_index):
+    def __handleControlText(self, form, control):
+        print self.__br
+        print control.name
+        # name=None, type=None, kind=None, id=None,predicate=None, nr=None,label=None
+        #form.find_control(control.name, control.type, None, control.id, None, None, None)
         form.find_control(control.name).readonly = False
+        self.__br[control.name] = str("")
+        form.find_control(control.name).readonly = True
+
+    def __handleControl(self, form, control, page_keys,page_index):
+        nCtl = False
+        if control.name is None:
+            return nCtl
+        #print control.name, page_keys, page_index
+        #print form.find_control(control.name).readonly
+        form.find_control(control.name).readonly = False
+        #print "set readonly as false done"
         page_key_count = len(page_keys)
         #print page_keys,page_index
+
         for i in range(0,page_key_count):
-            key_name = page_keys[i].split(":")[0]
+            key_name = page_keys[i][0]
             if control.name == key_name:
-                if page_keys[i].split(":")[1] != "":
-                    data = page_keys[i].split(":")[1]
+                nCtl = True
+                if page_keys[i][1] != "":
+                    data = page_keys[i][1]
                 else:
                     data = str(page_index)
                 self.__br[control.name] = str(data)
+                break
                 #print control.name,data
         form.find_control(control.name).readonly = True
+        return nCtl
 
     def __fillForm(self,form,page_keys,page_index):
         for control in self.__br.form.controls:
-            if control.type == "hidden":
-                self.__handleControlHidden(form, control, page_keys,page_index)
+            if control.type == "hidden" or control.type == "text" or control.type == "textarea":
+                self.__handleControl(form, control, page_keys,page_index)
 
-    def handleForm(self,url,submitter,index):
+            #elif
+             #       self.__handleControlText(form, control)
+
+    def handleForm(self,url,l_submitter,index):
         page_data = ""
         tried = 1
         fs = []
         while True:
             try:
                 self.__br.open(url)
-                self.__br.title()
                 fs = self.__br.forms()
                 break
-            except mechanize.HTTPError as e:
-                self.__logger.error(e.code)
+            except Exception,e:
+                self.__logger.error("Exception:" + str(e))
                 tried = tried + 1
                 if tried > self.__RETRY_TIMES__:
                     return page_data
                 time.sleep(self.__PAGE_INTERVAL__)
 
-            except mechanize.URLError as e:
-                self.__logger.error(e.reason.args)
-                tried = tried + 1
-                if tried > self.__RETRY_TIMES__:
-                    return page_data
-                time.sleep(self.__PAGE_INTERVAL__)
-
-        keys = submitter.split(",")
-        key = keys[0].split(":")[0]
+        keys = l_submitter
+        key = keys[0][0]
         i = -1
         #print "fs",fs
         for f in fs:

@@ -330,6 +330,7 @@ class grab:
         url_sample = self.__c.getValue(task_id,"url")
         page_base = self.__genPageBase(int(self.__c.getValue("Runtime","page_base")),int(self.__c.getValue("Runtime","session_interval")))
         #print folder
+        #anti_grab_interval = self.__c.getValue(task_id,"anti_grab_interval")
         task_mode = self.__detectTaskMode(folder)
         self.__logger.info("====%s...====" %task_name[task_mode])
         if task_mode == __INITIAL__:
@@ -370,6 +371,8 @@ class grab:
                 #if len(changed_urls) < url_count_per_page:
                 #    self.__logger.debug("count of changed url %i is less than the count per page %i" %(len(changed_urls),url_count_per_page))
                 #    break
+            #if anti_grab_interval != "":
+            #    time.sleep(int(anti_grab_interval))
         self.__logger.info("===Scanning Done===")
         if changed_urls_all == []:
             self.__logger.info("Nothing changed")

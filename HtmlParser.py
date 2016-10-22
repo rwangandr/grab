@@ -27,6 +27,10 @@ class htmlpaser:
     def getHtmlData(self, url):
         data = ""
         req = urllib2.Request(url)
+        #request = urllib2.Request('http://www.baidu.com/')
+        req.add_header('User-Agent', 'fake-client')
+
+
         tried = 1
         while True:
             try:

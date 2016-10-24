@@ -40,7 +40,7 @@ class jspost:
                 self.__logger.error(e)
                 tried += 1
                 if tried > self.__RETRY_TIMES__:
-                    self.__logger.error("Fail to visit url" %url)
+                    self.__logger.error("Fail to visit url %s" %url)
                     break
                 time.sleep(self.__PAGE_INTERVAL__)
                 self.__logger.warn("Retry %i" %tried)

@@ -390,7 +390,7 @@ class grab:
         i = 1
         for line in changeList:
             try:
-                notify_line = '<a href=\"' + line.split(";")[1] + '\">' + str(i) + "." +line.split(";")[0] + '</a>'
+                notify_line = str(i) + "." + '<a href=\"' + line.split(";")[1] + '\">' + line.split(";")[0] + '</a>'
             except:
                 notify_line = ""
             notify = notify + notify_line + '<br>'
